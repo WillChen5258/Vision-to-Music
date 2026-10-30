@@ -1,120 +1,111 @@
-# Vision-to-Music System
+# Vision-to-Music
 
-This repository contains the source code for a real-time vision-to-music system using Python, OpenCV, Open Sound Control (OSC), and Csound.
+## Description
 
-The system uses a camera to analyze visual information and transform it into an interactive musical soundscape.
+Vision-to-Music is a real-time interactive music system developed using Python, OpenCV, and Csound. It translates visual information captured by a camera into an evolving musical soundscape, exploring how sound can provide an alternative way of experiencing visual environments.
 
-## Overview
-
-The system detects up to five prominent colored objects in real time. Python and OpenCV analyze each detected object's:
-
-- Horizontal position
-- Vertical position
-- Relative size
-- Dominant color
-
-This information is sent to Csound through OSC, where five continuously running synthesis voices respond to the visual parameters.
-
-Horizontal position controls stereo panning, vertical position controls pitch, chord voicing, or rhythmic patterns depending on the synthesis voice, and relative object size controls parameters including amplitude, filtering, reverb, delay, and modulation.
-
-The dominant color of the scene controls the overall musical mode.
-
-You can also connect a phone camera to the system and move around with your phone to "see" the music and your surroundings through sound. As the camera view changes, the detected objects, positions, sizes, and colors continuously reshape the soundscape.
-
-## Color-to-Mode Mapping
-
-| Color | Musical Mode |
-| --- | --- |
-| Red | Mixolydian |
-| Orange | Ionian |
-| Yellow | Lydian |
-| Green | Dorian |
-| Blue | Aeolian |
-| Purple | Phrygian |
-| White | Major Pentatonic |
-| Black | Locrian |
-
-A dominant color must account for at least 50% of the detected color information and remain stable for 2 seconds before the musical mode changes.
-
-## System Structure
-
-The project consists of three main components:
-
-### Python / OpenCV
-
-Captures the camera image, performs color and contour analysis, identifies up to five object candidates, and extracts their visual parameters.
-
-### Open Sound Control (OSC)
-
-Transfers the detected object information from Python to Csound through UDP on port `7770`.
-
-The system uses two OSC message types:
-
-```text
-/object [object_id, x, y, relative_size, color_id]
-/mode [color_id]
-```
-
-### Csound
-
-Receives the OSC data and maps it to five synthesis voices:
-
-- Harmonic Pad
-- Reverse FX
-- Bass Drone
-- FM Texture Lead
-- Harmonic Bell
-
-The Csound system also includes autonomous chord progression and modulation processes that allow the soundscape to continue evolving even when the visual scene remains still.
+The system detects up to five prominent colored regions and uses their positions, relative sizes, and dominant colors to control musical parameters, with potential applications in accessibility and interactive sound design.
 
 ## Requirements
 
-### Python
+Before using Vision-to-Music, make sure you have:
 
-- Python 3
-- OpenCV
-- NumPy
-- python-osc
+- Python 3 installed: https://www.python.org/
+- OpenCV, NumPy, and python-osc installed.
+- Csound 6.18 installed: https://csound.com/
+- CsoundQt installed: https://csoundqt.github.io/
+- A webcam or compatible camera input.
 
-Install the required Python packages with:
+Install the required Python packages using:
 
 ```bash
 pip install opencv-python numpy python-osc
 ```
 
-### Csound
+## Features
 
-Install Csound and make sure your audio output is configured correctly.
+### 1. Computer Vision
 
-The system uses OSC port `7770` for communication between Python and Csound.
+Vision-to-Music uses Python and OpenCV to detect and track up to five prominent colored regions in real time. Each detected region is assigned an object ID and tracked across frames to maintain continuity.
 
-## Running the Project
+The system extracts each region's normalized horizontal and vertical positions, relative size, and dominant color for musical mapping.
 
-1. Connect or enable your camera.
-2. Open the Csound `.csd` file.
-3. Start the Csound performance.
-4. Open a terminal in the project directory.
-5. Run the Python script:
+### 2. Open Sound Control (OSC)
 
-```bash
-python src/vision_to_music.py
-```
+Python communicates with Csound through OSC using UDP port `7770` and three message types:
 
-6. Move the camera or place different colored objects in front of it to interact with the soundscape.
-7. Click the OpenCV camera window and press `q` to stop the Python program.
+- **`/object`:** Sends object ID, horizontal position, vertical position, relative size, and color ID.
+- **`/mode`:** Sends the confirmed dominant color ID.
+- **`/gone`:** Notifies Csound when a tracked object disappears.
 
-## Repository Contents
+### 3. Visual-to-Sound Mapping
 
-```text
-vision-to-music-system/
-├── README.md
-└── src/
-    ├── vision_to_music.py
-    └── vision_to_music.csd
-```
+The detected visual information controls different synthesis parameters in Csound:
 
-## Current Limitations
+- **Horizontal Position (X):** Controls stereo panning across all five instruments, with additional modulation creating movement within the stereo field.
+- **Vertical Position (Y):** Controls chord voicing in the Harmonic Pad, rhythmic patterns in the Reverse FX, melodic pitch in the FM Texture Lead, and rhythmic and melodic variations in the Harmonic Bell.
+- **Relative Size:** Controls amplitude and filter cutoff across all five instruments, rhythmic speed in the Reverse FX and Harmonic Bell, FM modulation depth in the FM Texture Lead, and the amount of reverb and delay.
+- **Dominant Color:** Selects one of eight musical modes, determining the shared harmonic structure and chord progressions.
 
-The current prototype does not maintain persistent object identities across frames. Object IDs are reassigned according to contour-area ranking, and the Python system does not currently send an explicit disappearance message when an object leaves the frame.
+### 4. Color-to-Mode Mapping and Chord Progressions
 
-Future development will explore persistent object tracking, explicit voice-release handling, performance improvements, additional sound mappings, and mobile or browser-based implementations.
+Vision-to-Music maps eight colors to eight musical modes, each with its own four-chord progression:
+
+| Color | Musical Mode | Chord Progression (Scale Degrees) |
+| --- | --- | --- |
+| Red | Mixolydian | 0 – 0 – 6 – 3 |
+| Orange | Ionian | 0 – 4 – 5 – 3 |
+| Yellow | Lydian | 0 – 0 – 1 – 4 |
+| Green | Dorian | 0 – 3 – 0 – 6 |
+| Blue | Aeolian | 0 – 0 – 5 – 2 |
+| Purple | Phrygian | 0 – 1 – 0 – 6 |
+| White | Major Pentatonic | 0 – 3 – 0 – 4 |
+| Black | Locrian | 0 – 1 – 0 – 6 |
+
+Scale degrees are zero-indexed, with `0` representing the first degree of the active musical mode.
+
+The dominant scene color must remain stable for 2 seconds and account for at least 50% of the detected color information. Chord progressions advance every 5 seconds.
+
+### 5. Sound Synthesis
+
+The Csound synthesis engine contains five continuously running instruments:
+
+- **Harmonic Pad:** Creates evolving harmonic textures using layered oscillators, filtering, and modulation.
+- **Reverse FX:** Generates rhythmic melodic patterns and filtered noise textures.
+- **Bass Drone:** Provides low-frequency harmonic support through sustained bass tones.
+- **FM Texture Lead:** Creates evolving melodic textures using frequency modulation.
+- **Harmonic Bell:** Produces rhythmic, bell-like tones with harmonic overtones.
+
+Each instrument responds independently to a tracked object, while slow modulation keeps the soundscape evolving even when the camera view remains unchanged.
+
+## Installation
+
+1. Install the required software listed above.
+2. Download the Vision-to-Music project folder.
+3. Keep `vision_to_music.py` and `vision_to_music.csd` in the project directory.
+4. Connect a webcam or enable a compatible camera input.
+
+**Note:** The Python script uses the AVFoundation camera backend on macOS. Other operating systems may require a different OpenCV camera configuration.
+
+## How to Use
+
+### 1. Launching Vision-to-Music
+
+1. Open `vision_to_music.csd` in CsoundQt.
+2. Click **Run** to start the Csound performance.
+3. Open a terminal in the project directory and run:
+
+   ```bash
+   python vision_to_music.py
+   ```
+
+4. The camera window will open and begin detecting colored regions.
+
+### 2. Interacting with the Soundscape
+
+Move the camera or place colored objects in front of it. Experiment with their positions, apparent sizes, and colors to explore different musical textures and harmonies.
+
+### 3. Stopping Vision-to-Music
+
+1. Select the OpenCV camera window and press `Q` to stop the Python program.
+2. Click **Stop** in CsoundQt to end audio synthesis.

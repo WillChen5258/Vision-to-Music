@@ -1,22 +1,24 @@
 """
-Vision-to-Music System - Color Mapped Version
+Vision-to-Music System
 
-This program captures live video from a webcam, detects prominent colored
-objects, extracts their position, relative size, and dominant color, and
-sends those values to Csound through Open Sound Control (OSC).
+This program captures video from a webcam, detects prominent colored
+regions, and sends their position, relative size, and dominant color to
+Csound through Open Sound Control (OSC).
 
-This version also analyzes the dominant color across the detected objects.
-When a color covers at least 50% of the detected object area and remains
-stable for 2 seconds, the program sends a mode-change message to Csound.
+The dominant scene color selects a musical mode when it covers at least
+50% of the detected color area and remains stable for 2 seconds.
+Tracked objects keep their IDs across frames. When an object disappears,
+a /gone message releases its Csound voice.
 
 Before running this script:
-1. Open and start the EP-491 Csound file in Csound.
+1. Start vision_to_music.csd in Csound.
 2. Run this script:
-       python vision_to_music_color_mapped.py
+       python vision_to_music.py
 
 OSC message formats:
-    /object [object_id, x, y, distance, color_id]
+    /object [object_id, x, y, size, color_id]
     /mode [color_id]
+    /gone [object_id]
 
 Color-to-mode mapping:
     Red    -> Mixolydian
@@ -28,12 +30,7 @@ Color-to-mode mapping:
     White  -> Major Pentatonic
     Black  -> Locrian
 
-The object values are normalized so they can be mapped easily to musical
-parameters inside Csound. The stable dominant-color system prevents the
-musical mode from changing too quickly because of camera movement or
-small color fluctuations.
-
-Press the Q key to close the camera window and stop the program.
+Press Q to close the camera window.
 """
 
 import cv2
@@ -52,6 +49,16 @@ max_objects = 5
 minimum_dominant_percentage = 50.0
 # Require the dominant color to remain stable for 2 seconds before changing the mode.
 required_stable_time = 2.0
+
+# Keep object IDs consistent across frames using nearest-centroid tracking.
+# Maximum distance in pixels for matching an object between frames.
+max_track_distance = 120.0
+
+# Release an object after 0.5 seconds without a match.
+track_timeout = 0.5
+
+# Active tracks: track_id -> {"cx", "cy", "last_seen"}
+tracks = {}
 
 # Map each detected color to its corresponding musical mode.
 color_modes = {
@@ -172,6 +179,55 @@ def classify_object_color(color_masks, contour, image_shape):
     )
 
 
+# Match detected objects to existing tracks using their center positions.
+def match_detections_to_tracks(tracks, detections, max_distance, max_tracks):
+    candidate_pairs = []
+
+    for track_id, track in tracks.items():
+        for detection_index, detection in enumerate(detections):
+            dx = detection["cx"] - track["cx"]
+            dy = detection["cy"] - track["cy"]
+            distance_px = (dx * dx + dy * dy) ** 0.5
+
+            if distance_px <= max_distance:
+                candidate_pairs.append((distance_px, track_id, detection_index))
+
+    # Match the closest objects first.
+    candidate_pairs.sort(key=lambda item: item[0])
+
+    matched_track_ids = set()
+    detection_track_id = {}
+
+    for distance_px, track_id, detection_index in candidate_pairs:
+        if track_id in matched_track_ids:
+            continue
+
+        if detection_index in detection_track_id:
+            continue
+
+        matched_track_ids.add(track_id)
+        detection_track_id[detection_index] = track_id
+
+    # Assign available IDs to new objects.
+    free_track_ids = [
+        candidate_id
+        for candidate_id in range(max_tracks)
+        if candidate_id not in tracks
+    ]
+
+    for detection_index in range(len(detections)):
+        if detection_index in detection_track_id:
+            continue
+
+        if not free_track_ids:
+            # Skip objects when all five slots are occupied.
+            continue
+
+        detection_track_id[detection_index] = free_track_ids.pop(0)
+
+    return detection_track_id
+
+
 # Continuously capture and process webcam frames.
 while True:
     # Read one frame from the webcam.
@@ -179,6 +235,8 @@ while True:
 
     if not ret:
         break
+
+    current_time = time.monotonic()
 
     # Mirror the image so movement feels natural to the user.
     frame = cv2.flip(frame, 1)
@@ -248,6 +306,8 @@ while True:
 
     valid_objects = valid_objects[:max_objects]
 
+    # Extract positions, sizes, and colors from the detected objects.
+    detections = []
     color_areas = {
         "Red": 0.0,
         "Orange": 0.0,
@@ -259,18 +319,11 @@ while True:
         "Black": 0.0
     }
 
-    detected_objects = []
-
-    for object_id, (area, contour) in enumerate(valid_objects):
+    for area, contour in valid_objects:
         x, y, w, h = cv2.boundingRect(contour)
 
         cx = x + w // 2
         cy = y + h // 2
-
-        x_norm = cx / frame.shape[1]
-        y_norm = cy / frame.shape[0]
-
-        distance = min(area / 50000.0, 1.0)
 
         (
             color_id,
@@ -285,9 +338,8 @@ while True:
 
         color_areas[color_name] += dominant_pixels
 
-        detected_objects.append(
+        detections.append(
             {
-                "object_id": object_id,
                 "area": area,
                 "contour": contour,
                 "x": x,
@@ -296,13 +348,68 @@ while True:
                 "h": h,
                 "cx": cx,
                 "cy": cy,
-                "x_norm": x_norm,
-                "y_norm": y_norm,
-                "distance": distance,
+                "x_norm": cx / frame.shape[1],
+                "y_norm": cy / frame.shape[0],
+                "size": min(area / 50000.0, 1.0),
                 "color_id": color_id,
                 "color_name": color_name,
                 "color_pixels": dominant_pixels,
                 "color_confidence": color_confidence
+            }
+        )
+
+    # Match detected objects to their tracked IDs.
+    detection_track_id = match_detections_to_tracks(
+        tracks,
+        detections,
+        max_track_distance,
+        max_objects
+    )
+
+    # Tell Csound when a tracked object disappears.
+    matched_track_ids = set(detection_track_id.values())
+
+    for track_id in list(tracks.keys()):
+        if track_id in matched_track_ids:
+            continue
+
+        if current_time - tracks[track_id]["last_seen"] >= track_timeout:
+            client.send_message("/gone", float(track_id))
+            print(f"/gone {track_id}")
+            del tracks[track_id]
+
+    # Update tracked objects for OSC messages and camera display.
+    detected_objects = []
+
+    for detection_index, detection in enumerate(detections):
+        if detection_index not in detection_track_id:
+            continue
+
+        track_id = detection_track_id[detection_index]
+
+        tracks[track_id] = {
+            "cx": detection["cx"],
+            "cy": detection["cy"],
+            "last_seen": current_time
+        }
+
+        detected_objects.append(
+            {
+                "object_id": track_id,
+                "area": detection["area"],
+                "x": detection["x"],
+                "y": detection["y"],
+                "w": detection["w"],
+                "h": detection["h"],
+                "cx": detection["cx"],
+                "cy": detection["cy"],
+                "x_norm": detection["x_norm"],
+                "y_norm": detection["y_norm"],
+                "size": detection["size"],
+                "color_id": detection["color_id"],
+                "color_name": detection["color_name"],
+                "color_pixels": detection["color_pixels"],
+                "color_confidence": detection["color_confidence"]
             }
         )
 
@@ -325,8 +432,6 @@ while True:
         dominant_color = "None"
         dominant_area = 0.0
         dominant_percentage = 0.0
-
-    current_time = time.monotonic()
 
     # Check whether the dominant color is strong enough to become a mode-change candidate.
     valid_candidate = (
@@ -373,7 +478,7 @@ while True:
                 float(obj["object_id"]),
                 float(obj["x_norm"]),
                 float(obj["y_norm"]),
-                float(obj["distance"]),
+                float(obj["size"]),
                 float(obj["color_id"])
             ]
         )
@@ -382,7 +487,7 @@ while True:
             f'/object {obj["object_id"]} '
             f'x={obj["x_norm"]:.2f} '
             f'y={obj["y_norm"]:.2f} '
-            f'distance={obj["distance"]:.2f} '
+            f'size={obj["size"]:.2f} '
             f'color={obj["color_name"]} '
             f'confidence={obj["color_confidence"]:.2f} '
             f'area={obj["area"]:.0f}'
@@ -414,7 +519,7 @@ while True:
                 f'{obj["color_name"]} '
                 f'X:{obj["x_norm"]:.2f} '
                 f'Y:{obj["y_norm"]:.2f} '
-                f'D:{obj["distance"]:.2f}'
+                f'S:{obj["size"]:.2f}'
             ),
             (
                 obj["x"],
@@ -447,7 +552,8 @@ while True:
         f"Dominant: {dominant_color}",
         f"Object Area: {dominant_percentage:.1f}%",
         f"Mode: {active_mode}",
-        f"Stable: {stable_text}"
+        f"Stable: {stable_text}",
+        f"Active tracks: {len(tracks)}"
     ]
 
     font = cv2.FONT_HERSHEY_SIMPLEX

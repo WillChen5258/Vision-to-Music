@@ -28,8 +28,9 @@ giHandle OSCinit 7770
 ; Current musical mode selected from the detected dominant color
 gkMode init -1
 
-; Lookup tables for the fallback pentatonic scale
-; and the eight color-mapped musical modes
+; Lookup tables for the default scale and eight color-mapped musical modes
+giFallback ftgen 0, 0, 8, -2, 0, 2, 3, 5, 7, 9, 10, 12
+
 giMixolydian ftgen 0, 0, 8, -2, 0, 2, 4, 5, 7, 9, 10, 12
 giIonian ftgen 0, 0, 8, -2, 0, 2, 4, 5, 7, 9, 11, 12
 giLydian ftgen 0, 0, 8, -2, 0, 2, 4, 6, 7, 9, 11, 12
@@ -41,6 +42,8 @@ giLocrian ftgen 0, 0, 8, -2, 0, 1, 3, 5, 6, 8, 10, 12
 
 ; Chord progression tables for the default scale
 ; and each color-mapped musical mode
+giProg ftgen 0, 0, 4, -2, 0, 5, 3, 4
+
 giProgMixolydian ftgen 0, 0, 4, -2, 0, 0, 6, 3
 giProgIonian ftgen 0, 0, 4, -2, 0, 4, 5, 3
 giProgLydian ftgen 0, 0, 4, -2, 0, 0, 1, 4
@@ -56,39 +59,39 @@ gaRevR init 0
 gaDelL init 0
 gaDelR init 0
 
-; Global variables for up to five detected object slots
+; Global variables for up to five tracked objects
 ; X = horizontal position
 ; Y = vertical position
-; D = relative size
+; S = relative size
 ; C = dominant color
 ; A = object activity
 gkX0 init 0.5
 gkY0 init 0.5
-gkD0 init 0
+gkS0 init 0
 gkC0 init 0
 gkA0 init 0
 
 gkX1 init 0.5
 gkY1 init 0.5
-gkD1 init 0
+gkS1 init 0
 gkC1 init 0
 gkA1 init 0
 
 gkX2 init 0.5
 gkY2 init 0.5
-gkD2 init 0
+gkS2 init 0
 gkC2 init 0
 gkA2 init 0
 
 gkX3 init 0.5
 gkY3 init 0.5
-gkD3 init 0
+gkS3 init 0
 gkC3 init 0
 gkA3 init 0
 
 gkX4 init 0.5
 gkY4 init 0.5
-gkD4 init 0
+gkS4 init 0
 gkC4 init 0
 gkA4 init 0
 
@@ -140,7 +143,7 @@ opcode ModeDegree, k, k
 
     kDegree xin
 
-    if gkMode == 6 || gkMode < 0 then
+    if gkMode == 6 || gkMode == -1 then
 
         kIndex = kDegree % 5
         kOctave = int(kDegree / 5)
@@ -222,13 +225,13 @@ opcode ModeChordDegree, k, k
 endop
 
 ; Map object relative size to reverb and delay amount
-opcode DistanceFX, k, k
+opcode SizeFX, k, k
 
-    kDistance xin
+    kSize xin
 
-    kDistance limit kDistance, 0, 1
+    kSize limit kSize, 0, 1
 
-    kMapped = limit((kDistance - 0.25) / 0.50, 0, 1)
+    kMapped = limit((kSize - 0.25) / 0.50, 0, 1)
 
     kFXAmount = 1 - kMapped
 
@@ -244,19 +247,46 @@ instr 1
     kID init 0
     kX init 0.5
     kY init 0.5
-    kDistance init 0
+    kSize init 0
     kColor init 0
     kMode init -1
+    kGoneID init 0
 
-    kTrig OSClisten giHandle, "/object", "fffff", kID, kX, kY, kDistance, kColor
+    kTrig OSClisten giHandle, "/object", "fffff", kID, kX, kY, kSize, kColor
 
     kModeTrig OSClisten giHandle, "/mode", "i", kMode
+
+    ; Release a voice when its tracked object leaves the frame
+    kGoneTrig OSClisten giHandle, "/gone", "f", kGoneID
 
     if kModeTrig == 1 then
 
         gkMode = kMode
 
         printf "Mode received: %d\n", kModeTrig, kMode
+
+    endif
+
+    if kGoneTrig == 1 then
+
+        kGoneObj = int(kGoneID)
+
+        if kGoneObj == 0 then
+            gkA0 = 0
+
+        elseif kGoneObj == 1 then
+            gkA1 = 0
+
+        elseif kGoneObj == 2 then
+            gkA2 = 0
+
+        elseif kGoneObj == 3 then
+            gkA3 = 0
+
+        elseif kGoneObj == 4 then
+            gkA4 = 0
+
+        endif
 
     endif
 
@@ -268,7 +298,7 @@ instr 1
 
             gkX0 = kX
             gkY0 = kY
-            gkD0 = kDistance
+            gkS0 = kSize
             gkC0 = kColor
             gkA0 = 1
 
@@ -276,7 +306,7 @@ instr 1
 
             gkX1 = kX
             gkY1 = kY
-            gkD1 = kDistance
+            gkS1 = kSize
             gkC1 = kColor
             gkA1 = 1
 
@@ -284,7 +314,7 @@ instr 1
 
             gkX2 = kX
             gkY2 = kY
-            gkD2 = kDistance
+            gkS2 = kSize
             gkC2 = kColor
             gkA2 = 1
 
@@ -292,7 +322,7 @@ instr 1
 
             gkX3 = kX
             gkY3 = kY
-            gkD3 = kDistance
+            gkS3 = kSize
             gkC3 = kColor
             gkA3 = 1
 
@@ -300,7 +330,7 @@ instr 1
 
             gkX4 = kX
             gkY4 = kY
-            gkD4 = kDistance
+            gkS4 = kSize
             gkC4 = kColor
             gkA4 = 1
 
@@ -315,7 +345,7 @@ instr 10
 
     kX portk gkX0, 0.12
     kY portk gkY0, 0.25
-    kD portk gkD0, 0.15
+    kSize portk gkS0, 0.15
     kA portk gkA0, 0.40
 
     kLastMode init -999
@@ -409,7 +439,7 @@ instr 10
 
     endif
 
-    kAmp = kA * (0.022 + kD * 0.10)
+    kAmp = kA * (0.022 + kSize * 0.10)
 
     kWobble oscili 0.10, 0.16
     kAmp = kAmp * (1 + kWobble)
@@ -437,7 +467,7 @@ instr 10
     aOut = (aLowRoot + aVoice1 + aVoice2 + \
             aVoice3 + aVoice4) * 0.46
 
-    kCutoff = 650 + (kD * 3000)
+    kCutoff = 650 + (kSize * 3000)
     aOut moogladder aOut, kCutoff, 0.18
 
     kPanMove oscili 0.035, 0.06
@@ -451,7 +481,7 @@ instr 10
     aL = aL1 + aL2
     aR = aR1 + aR2
 
-    kFX DistanceFX kD
+    kFX SizeFX kSize
 
     kRevSend = 0.65 + (kFX * 0.75)
 
@@ -470,7 +500,7 @@ instr 11
 
     kX portk gkX1, 0.06
     kY portk gkY1, 0.20
-    kD portk gkD1, 0.08
+    kSize portk gkS1, 0.08
     kA portk gkA1, 0.25
 
     kLastMode init -999
@@ -503,8 +533,8 @@ instr 11
     kSeventh = kBase * semitone(kSeventhSemi)
     kNinth = kBase * semitone(kNinthSemi)
 
-    kAmp = kA * (0.014 + kD * 0.072)
-    kRate = 1.0 + (kD * 2.8)
+    kAmp = kA * (0.014 + kSize * 0.072)
+    kRate = 1.0 + (kSize * 2.8)
 
     kTrig metro kRate
     kStep init 0
@@ -703,7 +733,7 @@ instr 11
 
     aOut = aBell1 + aBell2 + aBell3 + aBell4 + aAir
 
-    kFilterAmount = limit((kD - 0.10) / 0.45, 0, 1)
+    kFilterAmount = limit((kSize - 0.10) / 0.45, 0, 1)
     kFilterAmount = pow(kFilterAmount, 1.3)
 
     kCutoff = 1100 + (kFilterAmount * 5200)
@@ -721,7 +751,7 @@ instr 11
     aL = aL1 + aL2
     aR = aR1 + aR2
 
-    kFX DistanceFX kD
+    kFX SizeFX kSize
 
     kRevSend = 0.45 + (kFX * 0.90)
     kDelSend = 0.25 + (kFX * 0.50)
@@ -740,7 +770,7 @@ endin
 instr 12
 
     kX portk gkX2, 0.12
-    kD portk gkD2, 0.18
+    kSize portk gkS2, 0.18
     kA portk gkA2, 0.35
 
     kLastMode init -999
@@ -764,7 +794,7 @@ instr 12
     kRootSemi ModeDegree kChordDegree
     kRoot = kBase * semitone(kRootSemi)
 
-    kAmp = kA * (0.035 + kD * 0.14)
+    kAmp = kA * (0.035 + kSize * 0.14)
 
     kMove1 oscili 0.004, 0.06
     kMove2 oscili 0.003, 0.04
@@ -785,7 +815,7 @@ instr 12
     aOut = tanh(aOut * 1.5)
     aOut = aOut * 0.52
 
-    kFilterAmount = limit((kD - 0.10) / 0.45, 0, 1)
+    kFilterAmount = limit((kSize - 0.10) / 0.45, 0, 1)
     kFilterAmount = pow(kFilterAmount, 1.5)
 
     kCutoff = 70 + (kFilterAmount * 5000)
@@ -794,7 +824,7 @@ instr 12
 
     aL, aR pan2 aOut, kX
 
-    kFX DistanceFX kD
+    kFX SizeFX kSize
 
     gaRevL += aL * kFX * 0.45
     gaRevR += aR * kFX * 0.45
@@ -811,14 +841,14 @@ instr 13
 
     kX portk gkX3, 0.08
     kY portk gkY3, 0.25
-    kD portk gkD3, 0.10
+    kSize portk gkS3, 0.10
     kA portk gkA3, 0.25
 
     kRoot QuantFreq kY, 1
 
-    kAmp = kA * (0.024 + kD * 0.10)
+    kAmp = kA * (0.024 + kSize * 0.10)
 
-    kModDepth = 35 + (kD * 120)
+    kModDepth = 35 + (kSize * 120)
 
     aMod oscili kModDepth, kRoot * 0.35
 
@@ -830,7 +860,7 @@ instr 13
 
     aOut = aCar + aLayer1 + aLayer2 + aBright
 
-    kFilterAmount = limit((kD - 0.10) / 0.45, 0, 1)
+    kFilterAmount = limit((kSize - 0.10) / 0.45, 0, 1)
     kFilterAmount = pow(kFilterAmount, 1.5)
 
     kCutoff = 120 + (kFilterAmount * 13000)
@@ -842,7 +872,7 @@ instr 13
 
     aL, aR pan2 aOut, kPan
 
-    kFX DistanceFX kD
+    kFX SizeFX kSize
 
     gaRevL += aL * kFX * 1.20
     gaRevR += aR * kFX * 1.20
@@ -859,7 +889,7 @@ instr 14
 
     kX portk gkX4, 0.08
     kY portk gkY4, 0.20
-    kD portk gkD4, 0.08
+    kSize portk gkS4, 0.08
     kA portk gkA4, 0.20
 
     kLastMode init -999
@@ -890,8 +920,8 @@ instr 14
     kSeventh = kBase * semitone(kSeventhSemi)
     kNinth = kBase * semitone(kNinthSemi)
 
-    kAmp = kA * (0.024 + kD * 0.09)
-    kTempo = 2.8 + (kD * 3.2)
+    kAmp = kA * (0.024 + kSize * 0.09)
+    kTempo = 2.8 + (kSize * 3.2)
 
     kMetro metro kTempo
     kStep init 0
@@ -1082,7 +1112,7 @@ instr 14
     aOut = aFund + aPartial1 + aPartial2 + \
            aPartial3 + aStrike
 
-    kFilterAmount = limit((kD - 0.10) / 0.45, 0, 1)
+    kFilterAmount = limit((kSize - 0.10) / 0.45, 0, 1)
     kFilterAmount = pow(kFilterAmount, 1.35)
 
     kCutoff = 900 + (kFilterAmount * 9000)
@@ -1099,7 +1129,7 @@ instr 14
 
     aL, aR pan2 aOut, kPan
 
-    kFX DistanceFX kD
+    kFX SizeFX kSize
 
     kRevSend = 0.35 + (kFX * 0.95)
     kDelSend = 0.15 + (kFX * 0.55)
@@ -1147,6 +1177,10 @@ i90 0 3600   ; Reverb and Delay
 </CsScore>
 
 </CsoundSynthesizer>
+
+
+
+
 
 
 
